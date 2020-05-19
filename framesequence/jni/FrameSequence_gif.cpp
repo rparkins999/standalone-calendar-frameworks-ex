@@ -111,12 +111,14 @@ FrameSequence_gif::FrameSequence_gif(Stream* stream) :
     }
 #endif
 
-    if (mGif->SColorMap) {
+    const ColorMapObject* cmap = mGif->SColorMap;
+    if (cmap) {
         // calculate bg color
         GraphicsControlBlock gcb;
         DGifSavedExtensionToGCB(mGif, 0, &gcb);
-        if (gcb.TransparentColor == NO_TRANSPARENT_COLOR) {
-            mBgColor = gifColorToColor8888(mGif->SColorMap->Colors[mGif->SBackGroundColor]);
+        if (gcb.TransparentColor == NO_TRANSPARENT_COLOR
+                && mGif->SBackGroundColor < cmap->ColorCount) {
+            mBgColor = gifColorToColor8888(cmap->Colors[mGif->SBackGroundColor]);
         }
     }
 }
@@ -148,7 +150,7 @@ static bool checkIfCover(const GifImageDesc& target, const GifImageDesc& covered
 static void copyLine(Color8888* dst, const unsigned char* src, const ColorMapObject* cmap,
                      int transparent, int width) {
     for (; width > 0; width--, src++, dst++) {
-        if (*src != transparent) {
+        if (*src != transparent && *src < cmap->ColorCount) {
             *dst = gifColorToColor8888(cmap->Colors[*src]);
         }
     }
@@ -307,19 +309,18 @@ long FrameSequenceState_gif::drawFrame(int frameNr,
                 cmap = frame.ImageDesc.ColorMap;
             }
 
-            if (cmap == NULL || cmap->ColorCount != (1 << cmap->BitsPerPixel)) {
-                ALOGW("Warning: potentially corrupt color map");
-            }
-
-            const unsigned char* src = (unsigned char*)frame.RasterBits;
-            Color8888* dst = outputPtr + frame.ImageDesc.Left +
-                    frame.ImageDesc.Top * outputPixelStride;
-            GifWord copyWidth, copyHeight;
-            getCopySize(frame.ImageDesc, width, height, copyWidth, copyHeight);
-            for (; copyHeight > 0; copyHeight--) {
-                copyLine(dst, src, cmap, gcb.TransparentColor, copyWidth);
-                src += frame.ImageDesc.Width;
-                dst += outputPixelStride;
+            // If a cmap is missing, the frame can't be decoded, so we skip it.
+            if (cmap) {
+                const unsigned char* src = (unsigned char*)frame.RasterBits;
+                Color8888* dst = outputPtr + frame.ImageDesc.Left +
+                        frame.ImageDesc.Top * outputPixelStride;
+                GifWord copyWidth, copyHeight;
+                getCopySize(frame.ImageDesc, width, height, copyWidth, copyHeight);
+                for (; copyHeight > 0; copyHeight--) {
+                    copyLine(dst, src, cmap, gcb.TransparentColor, copyWidth);
+                    src += frame.ImageDesc.Width;
+                    dst += outputPixelStride;
+                }
             }
         }
     }
@@ -359,4 +360,3 @@ static RegistryEntry gEntry = {
         acceptsBuffers,
 };
 static Registry gRegister(gEntry);
-
